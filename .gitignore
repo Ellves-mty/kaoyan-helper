@@ -1,0 +1,11 @@
+# 系统与编辑器
+Thumbs.db
+.DS_Store
+desktop.ini
+*.swp
+.vscode/
+.idea/
+
+# 本地测试产物
+*.local
+node_modules/

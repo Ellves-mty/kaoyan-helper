@@ -1,0 +1,100 @@
+# 考研解题助手（PWA）
+
+面向考研学生的个人解题工具：**数学一 / 英语一 / 408** 三科目专用，AI 详细解答 + 知识点分类 + 薄弱点统计（规划中）。
+
+当前版本：**v1.5** — 文本/图片/PDF 解题 + 英语整篇解析 + 知识点统计 + GitHub Gist 跨设备同步全流程可用；正式部署在后续阶段开放。
+
+## 功能
+
+- 三科目独立模块：数学一（21 个知识点）、英语一（题型+能力点）、408（20 个知识点），各配专用辅导提示词
+- **文本输入**：粘贴题目自动识别科目（也可手动切换）
+- **图片输入**：拍照 / 相册选图（最多 4 张）→ 通义千问 VL 自动识别为题目文本（数学转 LaTeX）→ 核对修正后解题
+- **文件输入**：支持 .txt 与 .pdf（pdf.js 提取前 20 页文字；扫描版 PDF 无文字层，请截图走图片识别）
+- **英语整篇解析**：粘贴完整文章（无需问题）→ 自动输出全文主旨 + 段落结构分析 + 长难句解析 + 生词提取（音标/释义/搭配例句，最多 15 词）
+- **公式渲染**：解答中的 LaTeX 公式（$...$ / $$...$$）自动渲染为排版公式（KaTeX，国内 CDN；CDN 不可用时回退为原文显示）
+- DeepSeek（deepseek-v4-flash）流式解题：思考过程 + 步骤化解答 + 知识点分类 + 难度 + 易错点
+- **统计可视化**：按科目查看知识点做题柱状图（次数 + 正确率，<50% 红色标为薄弱点）、薄弱点排行、综合正确率
+- **跨设备同步**：GitHub 私有 Gist 自动同步（手机/电脑/平板共用一份记录），启动自动拉取合并，支持手动立即同步
+- 完成自动保存到本地历史，可标记「做对 / 做错 / 没把握」
+- 本地 IndexedDB 存储，支持导出 / 导入 JSON 备份
+- PWA：可添加到手机主屏幕，全屏使用
+
+## 跨设备同步设置（GitHub Gist）
+
+1. 打开 [GitHub Token 生成页](https://github.com/settings/tokens/new?scopes=gist&description=kaoyan-helper)（需登录）
+2. 勾选 **gist** 权限，生成 Token 并复制（形如 `ghp_...` 或 `github_pat_...`）
+3. App「设置」→ 跨设备同步 → 填入 Token → 「立即同步」
+4. 首次同步自动创建**私有 Gist** 存储全部记录；之后每次打开 App 自动拉取合并
+
+说明：
+- 数据存在你自己的 GitHub 账号下（私有），Token 只保存在各设备浏览器本地
+- 合并规则：按记录时间戳，后修改的覆盖先修改的
+- 已知限制：删除的记录会在其他设备重新出现（暂不支持删除同步）；GitHub API 在国内偶尔访问较慢，失败时稍后重试即可
+- 无网络或未配置时，App 本地照常使用
+
+## 快速开始（本地测试）
+
+直接双击 `index.html` 用浏览器打开即可（推荐 Chrome/Edge；iPhone 建议部署后使用）。
+
+1. 打开「设置」标签
+2. 填入 DeepSeek API Key（必填，解题用）和通义千问 API Key（图片识别用，可选）
+3. 点「测试连接」逐个验证
+4. 去「解题」页：粘贴题目，或切到「图片」标签拍照/选图，点「提取题目文字」
+5. 核对识别结果（可修改），点「确认无误，开始解题」
+
+> 浏览器本地打开（file://）时离线缓存不生效，属于正常现象；部署到 HTTPS 后自动启用。
+
+## 在 iPhone 上使用（部署后）
+
+1. 把项目发布到 GitHub Pages（见下）
+2. iPhone 用 Safari 打开你的页面地址
+3. 点分享按钮 →「添加到主屏幕」
+4. 从主屏幕图标打开，即全屏 App 体验
+
+## 部署到 GitHub Pages
+
+```bash
+# 在项目目录初始化并推送
+git init
+git add .
+git commit -m "init: kaoyan-helper v1"
+git remote add origin https://github.com/<你的用户名>/kaoyan-helper.git
+git push -u origin main
+```
+
+然后进入仓库 Settings → Pages → Source 选 `main` 分支（根目录），保存后等待一两分钟，即可访问 `https://<用户名>.github.io/kaoyan-helper/`。
+
+> ⚠️ **安全提醒**：API Key 只保存在你自己的浏览器本地（localStorage），不会进入代码仓库。请不要把真实 Key 写进任何文件。
+
+## API 申请
+
+| 服务 | 用途 | 申请地址 | 费用 |
+|---|---|---|---|
+| DeepSeek | 解题推理 | platform.deepseek.com（创建 API Key 并充值） | 约 0.05~0.1 元/题（flash 模型） |
+| 通义千问（DashScope） | 阶段 2 图片识别 | bailian.console.aliyun.com | 新用户免费额度，之后按量计费 |
+
+## 路线图
+
+- [x] 阶段 1：PWA 骨架 + 三科目模块 + DeepSeek 文本解题 + 历史记录
+- [x] 阶段 2：拍照/相册 → 通义千问 VL 识别题目 → 核对修正 → 全流程
+- [x] 阶段 2.5：KaTeX 公式渲染（解答、易错点、历史全量覆盖）
+- [x] 阶段 3：统计页（知识点柱状图 + 正确率 + 薄弱点排行）
+- [x] 阶段 3.5：英语整篇解析（主旨 / 段落结构 / 长难句 / 生词提取）
+- [x] 阶段 4：GitHub Gist 跨设备同步 + PDF 输入
+- [ ] 阶段 5：离线优化 + 正式部署
+
+## 项目结构
+
+```
+index.html         入口（单页应用）
+manifest.json      PWA 配置
+sw.js              离线缓存 Service Worker
+css/style.css      样式
+js/subjects.js     三科目知识点分类树 + 提示词 + 科目识别
+js/db.js           IndexedDB 封装
+js/api.js          DeepSeek API 调用（流式）
+js/md.js           轻量 Markdown 渲染
+js/solve.js        解题 / 历史 / 记录详情
+js/app.js          路由 / 首页 / 统计 / 设置
+icons/             App 图标
+```

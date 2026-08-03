@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>db test</title></head>
+<body>
+<div id="out">waiting...</div>
+<script src="js/db.js"></script>
+<script>
+(async () => {
+  const out = document.getElementById('out');
+  try {
+    const r = await DB.add({ subject: 'math', question: '测试', answer: null, knowledgePoints: ['极限与连续'], updatedAt: Date.now() });
+    const all = await DB.getAll();
+    const n = await DB.updateAnswer(r.id, 'correct');
+    const back = await DB.get(r.id);
+    const exp = await DB.exportJSON();
+    await DB.clear();
+    out.textContent = 'DB-OK add=' + !!r.id + ' count=' + all.length + ' answer=' + back.answer + ' exportLen=' + exp.length;
+  } catch (e) {
+    out.textContent = 'DB-ERROR ' + e.name + ': ' + e.message;
+  }
+})();
+</script>
+</body>
+</html>
