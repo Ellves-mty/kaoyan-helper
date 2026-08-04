@@ -195,19 +195,37 @@ const SolveView = (() => {
     }
   }
 
-  /* PDF 文字提取（pdf.js，最多前 20 页） */
+  /* PDF 文字提取（pdf.js，最多前 20 页；worker 多 CDN 超时重试） */
   async function extractPdfText(file) {
     if (!window.pdfjsLib) throw new Error("PDF 解析库未加载（需联网），请稍后重试或改用文本输入");
-    try {
-      pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.bootcdn.net/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-    } catch (e) {}
-    const doc = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+    const data = await file.arrayBuffer();
+    const workerSrcs = [
+      "https://cdn.bootcdn.net/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js",
+      "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js"
+    ];
+    let lastErr = null;
+    for (const src of workerSrcs) {
+      try {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = src;
+        const doc = await Promise.race([
+          pdfjsLib.getDocument({ data }).promise,
+          new Promise((_, rej) => setTimeout(() => rej(new Error("worker 加载超时")), 8000))
+        ]);
+        return await extractPdfPages(doc);
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    throw new Error("PDF 解析失败：" + (lastErr ? lastErr.message : "未知错误"));
+  }
+
+  async function extractPdfPages(doc) {
     const pages = Math.min(doc.numPages, 20);
     const parts = [];
     for (let i = 1; i <= pages; i++) {
       const page = await doc.getPage(i);
       const content = await page.getTextContent();
-      const text = content.items.map((it) => it.str + (it.hasEOL ? "" : "")).join(" ")
+      const text = content.items.map((it) => it.str).join(" ")
         .replace(/[ \t]+/g, " ").trim();
       parts.push("【第 " + i + " 页】\n" + text);
     }
@@ -619,8 +637,8 @@ const SolveView = (() => {
 
     document.getElementById("btn-back").addEventListener("click", () => { location.hash = "#/history"; });
     document.getElementById("btn-del").addEventListener("click", async () => {
-      if (confirm("确定删除这条记录吗？")) {
-        await DB.remove(rec.id);
+      if (confirm("确定删除这条记录吗？（同步后其他设备也会删除）")) {
+        await DB.softDelete(rec.id);
         toast("已删除");
         location.hash = "#/history";
       }

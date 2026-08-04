@@ -67,6 +67,7 @@ async function main() {
 
       /* 场景1：设备 A 首次同步（2 条本地记录） */
       await DB.clear();
+      await DB.clearTombstones();
       const a = await DB.add({ subject: 'math', question: 'A题', solution: '解', category: '高数', type: '选择题', knowledgePoints: ['极限与连续'], difficulty: 2, tips: '', answer: 'wrong', answerAt: 1 });
       const b = await DB.add({ subject: 'english', question: 'B题', solution: '解', category: '阅读理解', type: '选择题', knowledgePoints: ['词汇'], difficulty: 3, tips: '', answer: 'correct', answerAt: 2 });
       setToken('test-token');
@@ -124,7 +125,7 @@ async function main() {
 
       /* 设备 B 本地只有 1 条记录，同步后应合并为 3 条，A 采用新版本 */
       await DB.clear();
-      await DB.add({ subject: 'cs', question: 'D题', solution: '解', category: '进程与线程', type: '选择题', knowledgePoints: ['进程与线程'], difficulty: 2, tips: '', answer: null, answerAt: 4 });
+      const dRec = await DB.add({ subject: 'cs', question: 'D题', solution: '解', category: '进程与线程', type: '选择题', knowledgePoints: ['进程与线程'], difficulty: 2, tips: '', answer: null, answerAt: 4 });
       let r2 = null;
       try { r2 = await Sync.syncNow(); } catch (e) { out.syncErr2 = e.message; }
       const merged = await DB.getAll();
@@ -142,6 +143,60 @@ async function main() {
       try { await Sync.syncNow(); } catch (e) { errMsg = e.message; }
       out.errMsg = errMsg;
       setToken('test-token');
+
+      /* 场景5：设备 A 删除记录 B → 删除传播到云端 */
+      out.ids = { a: a.id, b: b.id };
+      let sdErr = '';
+      try { await DB.softDelete(b.id); } catch (e) { sdErr = e.message; }
+      out.sdErr = sdErr;
+      out.afterSoftDeleteLocal = !!(await DB.get(b.id));
+      out.aTomb = !!(await DB.getTombstones()).find(t => t.id === a.id);
+      out.bTomb = !!(await DB.getTombstones()).find(t => t.id === b.id);
+      out.idsAfter = (await DB.getAll()).map(r => r.id);
+      let r5 = null;
+      try { r5 = await Sync.syncNow(); } catch (e) { out.syncErr5 = e.message; }
+      const gist5 = await (await fetch('http://localhost:8123/gists/' + gistId, { headers: { 'Authorization': 'Bearer test-token' } })).json();
+      const file5 = JSON.parse(gist5.files['kaoyan-helper-data.json'].content);
+      out.r5 = r5 ? { localCount: r5.localCount, changed: r5.changed } : null;
+      out.deletedOnCloud = (file5.deleted || []).map(t => t.id);
+      let r5b = null;
+      try { r5b = await Sync.syncNow(); } catch (e) { out.syncErr5b = e.message; }
+      out.r5Idempotent = r5b ? r5b.changed : null;
+
+      /* 场景6：设备 C 持有旧数据（含 B），同步后 B 应被删除，不复活 */
+      await DB.clear();
+      await DB.clearTombstones();
+      for (const r of [a, b, remoteC, dRec]) {
+        await DB.putRaw(r);
+      }
+      out.staleIds = (await DB.getAll()).map(r => r.id);
+      out.staleLocalCount = (await DB.getAll()).length;
+      let r6 = null;
+      try { r6 = await Sync.syncNow(); } catch (e) { out.syncErr6 = e.message; }
+      const after6 = await DB.getAll();
+      out.r6 = { localCount: after6.length, ids: after6.map(r => r.id), hasB: !!after6.find(x => x.id === b.id) };
+      let r6b = null;
+      try { r6b = await Sync.syncNow(); } catch (e) { out.syncErr6b = e.message; }
+      out.r6Idempotent = r6b ? r6b.changed : null;
+
+      /* 场景7：另一设备在删除之后又编辑了 B（updatedAt > deletedAt）→ 复活 */
+      const tombOld = { id: b.id, deletedAt: Date.now() - 60000 };
+      const revivedB = { ...b, answer: 'correct', updatedAt: Date.now() };
+      const gist7 = await (await fetch('http://localhost:8123/gists/' + gistId, { headers: { 'Authorization': 'Bearer test-token' } })).json();
+      const file7 = JSON.parse(gist7.files['kaoyan-helper-data.json'].content);
+      const otherRecords = (file7.records || []).filter(r => r.id !== b.id);
+      await fetch('http://localhost:8123/gists/' + gistId, {
+        method: 'PATCH',
+        headers: { 'Authorization': 'Bearer test-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: { 'kaoyan-helper-data.json': { content: JSON.stringify({ version: 2, records: [revivedB, ...otherRecords], deleted: [tombOld] }) } } })
+      });
+      await DB.clear();
+      await DB.clearTombstones();
+      let r7 = null;
+      try { r7 = await Sync.syncNow(); } catch (e) { out.syncErr7 = e.message; }
+      const after7 = await DB.getAll();
+      const b7 = after7.find(x => x.id === b.id);
+      out.r7 = { localCount: after7.length, hasB: !!b7, bAnswer: b7 && b7.answer };
       return out;
     })()`);
   console.log('RESULT:', JSON.stringify(result, null, 2));
@@ -161,7 +216,18 @@ async function main() {
     result.r2.hasB === true &&
     result.r3.changed === false &&
     result.r3.localCount === 4 &&
-    result.errMsg.includes('Token 无效');
+    result.errMsg.includes('Token 无效') &&
+    result.afterSoftDeleteLocal === false &&
+    result.r5.localCount === 3 &&
+    result.r5.changed === true &&
+    result.deletedOnCloud.includes(result.ids.b) &&
+    result.r5Idempotent === false &&
+    result.r6.localCount === 3 &&
+    result.r6.hasB === false &&
+    result.r6Idempotent === false &&
+    result.r7.localCount === 4 &&
+    result.r7.hasB === true &&
+    result.r7.bAnswer === 'correct';
 
   console.log(ok ? '=== Gist 同步测试通过 ===' : '=== Gist 同步测试失败 ===');
   ws.close();

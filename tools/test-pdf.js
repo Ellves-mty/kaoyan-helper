@@ -152,7 +152,7 @@ async function main() {
   });
   out.setFilesOk = !!setFiles;
 
-  await sleep(20000);
+  await sleep(30000);
 
   const flow = await evalJs(ws, `(async () => {
     const ta = document.getElementById('solve-question');

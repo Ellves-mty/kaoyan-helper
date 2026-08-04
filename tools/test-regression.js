@@ -54,6 +54,13 @@ async function main() {
   await new Promise((r) => setTimeout(r, 300));
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+  /* 等待应用就绪（全新浏览器配置首次启动较慢） */
+  for (let i = 0; i < 30; i++) {
+    const ready = await evalJs(ws, `typeof App !== 'undefined' && typeof DB !== 'undefined' && typeof SolveView !== 'undefined'`);
+    if (ready) break;
+    await sleep(500);
+  }
+
   await evalJs(ws, `location.hash = '#/solve'; 'ok'`);
   await sleep(800);
   await evalJs(ws, `DB.clear(); 'ok'`);

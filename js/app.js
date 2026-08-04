@@ -380,9 +380,9 @@ const App = (() => {
 
       <div class="card">
         <div class="card-title">ℹ️ 关于</div>
-        <div class="muted">考研解题助手 v1.5（跨设备同步 + PDF）<br>
+        <div class="muted">考研解题助手 v1.6（同步删除）<br>
         科目：数学一 / 英语一 / 408<br>
-        路线图：部署上线</div>
+        GitHub Gist 跨设备同步（含删除）· 已部署</div>
       </div>`;
 
     const onChange = () => {
@@ -484,7 +484,7 @@ const App = (() => {
     document.getElementById("btn-clear").addEventListener("click", async () => {
       if (confirm("确定清空全部记录？此操作不可恢复（建议先导出备份）")) {
         if (confirm("再次确认：真的要清空吗？")) {
-          await DB.clear();
+          await DB.clearAllSoft();
           toast("已清空");
           renderSettings();
         }
@@ -508,4 +508,8 @@ const App = (() => {
   return { init, toast };
 })();
 
-document.addEventListener("DOMContentLoaded", App.init);
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", App.init);
+} else {
+  App.init();
+}

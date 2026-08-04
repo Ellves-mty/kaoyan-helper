@@ -13,9 +13,45 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="preconnect" href="https://cdn.bootcdn.net" crossorigin>
 <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/KaTeX/0.16.9/katex.min.css">
-<script defer src="https://cdn.bootcdn.net/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
-<script defer src="https://cdn.bootcdn.net/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
-<script defer src="https://cdn.bootcdn.net/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+/* CDN 库异步加载：不阻塞页面启动，按依赖顺序链式加载，主备 CDN 自动降级（含超时） */
+(function () {
+  function load(src, next) {
+    var s = document.createElement("script");
+    s.src = src;
+    s.async = true;
+    var done = false;
+    function finish() {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      if (next) next();
+    }
+    s.onload = finish;
+    s.onerror = finish;
+    var timer = setTimeout(finish, 4000);
+    document.head.appendChild(s);
+  }
+  function chain(list, next) {
+    if (!list.length) { if (next) next(); return; }
+    load(list[0], function () { chain(list.slice(1), next); });
+  }
+  var K = [
+    "https://cdn.bootcdn.net/ajax/libs/KaTeX/0.16.9/katex.min.js",
+    "https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"
+  ];
+  var A = [
+    "https://cdn.bootcdn.net/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js",
+    "https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+  ];
+  var P = [
+    "https://cdn.bootcdn.net/ajax/libs/pdf.js/3.11.174/pdf.min.js",
+    "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"
+  ];
+  chain(K, function () { chain(A); });
+  chain(P);
+})();
+</script>
 <title>考研解题助手</title>
 <link rel="stylesheet" href="css/style.css">
 </head>

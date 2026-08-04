@@ -2,8 +2,9 @@
 
 const DB = (() => {
   const DB_NAME = "kaoyan-helper";
-  const DB_VERSION = 1;
+  const DB_VERSION = 2;
   const STORE = "records";
+  const TOMBSTORE = "tombstones";
   let dbPromise = null;
 
   function open() {
@@ -18,6 +19,9 @@ const DB = (() => {
           store.createIndex("updatedAt", "updatedAt");
           store.createIndex("subject", "subject");
         }
+        if (!db.objectStoreNames.contains(TOMBSTORE)) {
+          db.createObjectStore(TOMBSTORE, { keyPath: "id" });
+        }
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
@@ -25,15 +29,15 @@ const DB = (() => {
     return dbPromise;
   }
 
-  async function withStore(mode, fn) {
+  async function withStore(mode, fn, storeName) {
     const db = await open();
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE, mode);
-      const store = tx.objectStore(STORE);
+      const tx = db.transaction(storeName || STORE, mode);
+      const store = tx.objectStore(storeName || STORE);
       let result;
       try {
         result = fn(store);
-        tx.oncomplete = () => resolve(result && result.result !== undefined ? result.result : result);
+        tx.oncomplete = () => resolve(result && result.result !== undefined ? result.result : undefined);
       } catch (err) {
         reject(err);
       }
@@ -56,6 +60,12 @@ const DB = (() => {
       await withStore("readwrite", (s) => s.put(record));
       return record;
     },
+    /* 原样写入，不刷新 updatedAt（同步合并回写用） */
+    async putRaw(record) {
+      if (!record || !record.id) return null;
+      await withStore("readwrite", (s) => s.put(record));
+      return record;
+    },
     async get(id) {
       return withStore("readonly", (s) => s.get(id));
     },
@@ -72,12 +82,44 @@ const DB = (() => {
     async remove(id) {
       await withStore("readwrite", (s) => s.delete(id));
     },
+    /* 软删除：删记录 + 记墓碑（同步时传播删除） */
+    async softDelete(id) {
+      const rec = await this.get(id);
+      await withStore("readwrite", (s) => s.delete(id));
+      await this.putTombstone({ id, deletedAt: Date.now() });
+      return rec;
+    },
+    /* 清空全部记录（保留墓碑，让删除同步到其他设备） */
+    async clearAllSoft() {
+      const all = await this.getAll();
+      await withStore("readwrite", (s) => s.clear());
+      const now = Date.now();
+      for (const r of all) {
+        await this.putTombstone({ id: r.id, deletedAt: now });
+      }
+      return all.length;
+    },
     async clear() {
       await withStore("readwrite", (s) => s.clear());
     },
+    async getTombstones() {
+      const all = await withStore("readonly", (s) => s.getAll(), TOMBSTORE);
+      return (all || []).sort((a, b) => (b.deletedAt || 0) - (a.deletedAt || 0));
+    },
+    async putTombstone(t) {
+      if (!t || !t.id) return;
+      await withStore("readwrite", (s) => s.put(t), TOMBSTORE);
+    },
+    async clearTombstones() {
+      await withStore("readwrite", (s) => s.clear(), TOMBSTORE);
+    },
     async exportJSON() {
       const all = await this.getAll();
-      return JSON.stringify({ app: "kaoyan-helper", version: 1, exportedAt: new Date().toISOString(), records: all }, null, 2);
+      const tombs = await this.getTombstones();
+      return JSON.stringify({
+        app: "kaoyan-helper", version: 2, exportedAt: new Date().toISOString(),
+        records: all, tombstones: tombs
+      }, null, 2);
     },
     async importJSON(text) {
       const data = JSON.parse(text);
@@ -87,7 +129,11 @@ const DB = (() => {
         records.forEach((r) => {
           if (r && r.id) s.put(r);
         });
-      });
+      }, STORE);
+      const tombs = Array.isArray(data && data.tombstones) ? data.tombstones : [];
+      for (const t of tombs) {
+        if (t && t.id) await this.putTombstone(t);
+      }
       return records.length;
     }
   };

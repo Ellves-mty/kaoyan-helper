@@ -1,4 +1,4 @@
-const CACHE_NAME = "kaoyan-helper-v7";
+const CACHE_NAME = "kaoyan-helper-v8";
 const SHELL = [
   "./",
   "./index.html",
