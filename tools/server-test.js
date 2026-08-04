@@ -22,6 +22,7 @@ const VALID_TOKEN = 'test-token';
 
 let gistSeq = 1;
 const gists = new Map();
+const repos = new Map();
 
 function json(res, status, body) {
   res.writeHead(status, Object.assign({ 'Content-Type': 'application/json; charset=utf-8' }, CORS_HEADERS));
@@ -85,6 +86,37 @@ function handleApi(urlPath, req, res) {
         }
         g.updated_at = new Date().toISOString();
         json(res, 200, g);
+      } else if (method === 'GET' && base === '/user') {
+        json(res, 200, { login: 'test-user', id: 1 });
+      } else if (method === 'POST' && base === '/user/repos') {
+        const data = JSON.parse(body || '{}');
+        if (repos.has(data.name)) { json(res, 422, { message: 'name already exists on this account' }); return; }
+        repos.set(data.name, new Map());
+        json(res, 201, { name: data.name, private: true, full_name: 'test-user/' + data.name });
+      } else if (/^\/repos\/[\w-]+\/[\w-]+\/contents\/[\w.-]+$/.test(base)) {
+        const parts = base.split('/');
+        const owner = parts[2], repo = parts[3], file = parts[5];
+        if (owner !== 'test-user') { json(res, 404, { message: 'Not Found' }); return; }
+        const repoFiles = repos.get(repo);
+        if (method === 'GET') {
+          if (!repoFiles || !repoFiles.has(file)) { json(res, 404, { message: 'Not Found' }); return; }
+          const rec = repoFiles.get(file);
+          json(res, 200, { name: file, path: file, sha: rec.sha, size: rec.bytes, encoding: 'base64', content: rec.content });
+        } else if (method === 'PUT') {
+          const data = JSON.parse(body || '{}');
+          if (!repoFiles) { json(res, 404, { message: 'Not Found' }); return; }
+          const existing = repoFiles.get(file);
+          if (existing && data.sha !== existing.sha) {
+            json(res, 409, { message: 'sha does not match current file' });
+            return;
+          }
+          const bytes = Buffer.byteLength(Buffer.from(data.content || '', 'base64'), 'utf8');
+          const sha = 'sha_' + Math.random().toString(36).slice(2, 10);
+          repoFiles.set(file, { content: data.content, sha, bytes });
+          json(res, existing ? 200 : 201, { content: { name: file, path: file, sha, size: bytes } });
+        } else {
+          json(res, 404, { message: 'Not Found' });
+        }
       } else {
         json(res, 404, { message: 'Not Found' });
       }
@@ -97,7 +129,7 @@ function handleApi(urlPath, req, res) {
 http.createServer((req, res) => {
   const urlPath = decodeURIComponent(req.url.split('?')[0]);
   const target = urlPath === '/' ? '/index.html' : urlPath;
-  if (target.startsWith('/gists')) {
+  if (target.startsWith('/gists') || target.startsWith('/user') || target.startsWith('/repos')) {
     handleApi(target, req, res);
     return;
   }

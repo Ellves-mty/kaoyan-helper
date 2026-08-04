@@ -285,13 +285,17 @@ const App = (() => {
     if (!el) return;
     const st = Sync.getStatus();
     const s = API.getSettings();
+    const typeName = st && st.storageType === "repo" ? "私有仓库" : "Gist";
     let html = "";
     if (!s.githubToken) {
       html = `<div class="muted">📴 未配置 Token，暂不同步。</div>`;
     } else if (st && st.error) {
       html = `<div class="danger-text">❌ 上次同步失败：${escapeHtml(st.error)}<br><span class="muted">${new Date(st.lastSyncAt).toLocaleString("zh-CN")}</span></div>`;
     } else if (st && st.lastSyncAt) {
-      html = `<div class="muted">✅ 上次同步：${new Date(st.lastSyncAt).toLocaleString("zh-CN")} · 共 ${st.localCount} 条记录${st.remoteCount !== null ? "（云端 " + st.remoteCount + " 条）" : ""}</div>`;
+      html = `<div class="muted">✅ 上次同步：${new Date(st.lastSyncAt).toLocaleString("zh-CN")} · ${typeName} · 共 ${st.localCount} 条记录${st.remoteCount !== null ? "（云端 " + st.remoteCount + " 条）" : ""}${st.sizeKB ? " · 数据 " + st.sizeKB + " KB" : ""}</div>`;
+      if (st.warning) {
+        html += `<div class="danger-text" style="margin-top:6px">⚠️ ${escapeHtml(st.warning)}</div>`;
+      }
     } else {
       html = `<div class="muted">⏳ 尚未同步过，点「立即同步」开始。</div>`;
     }
@@ -348,23 +352,45 @@ const App = (() => {
       </div>
 
       <div class="card">
-        <div class="card-title">☁️ 跨设备同步（GitHub Gist）</div>
+        <div class="card-title">☁️ 跨设备同步</div>
         <div class="field">
           <label>GitHub 个人访问令牌（Token）</label>
           <input type="password" id="set-github-token" placeholder="ghp_... 或 github_pat_..." value="${s.githubToken}">
           <div class="hint">
-            生成方法：GitHub → Settings → Developer settings → Personal access tokens → 生成新 Token，
-            勾选 <b>gist</b> 权限即可。数据保存在你自己的私有 Gist 中（免费），手机/电脑/平板共用一份记录。
+            生成方法：GitHub → Settings → Developer settings → Personal access tokens → 生成新 Token。
+            Gist 存储勾选 <b>gist</b> 权限；私有仓库存储还需勾选 <b>repo</b> 权限。数据保存在你自己的云端（免费）。
           </div>
         </div>
+
+        <div class="setting-row">
+          <div>
+            <div class="sr-label">存储位置</div>
+            <div class="sr-desc">Gist：上限约 1MB（已自动压缩）；私有仓库：上限 100MB，建议长期使用</div>
+          </div>
+          <select id="set-storage-type">
+            <option value="gist" ${s.storageType !== "repo" ? "selected" : ""}>Gist（默认）</option>
+            <option value="repo" ${s.storageType === "repo" ? "selected" : ""}>私有仓库</option>
+          </select>
+        </div>
+
+        <div class="field" id="repo-fields" ${s.storageType !== "repo" ? 'style="display:none"' : ""}>
+          <label>同步仓库名称（私有仓库存储时必填）</label>
+          <div style="display:flex;gap:8px">
+            <input type="text" id="set-repo-name" placeholder="如 kaoyan-helper-data" value="${s.repoName}" style="flex:1">
+            <button class="btn btn-ghost" id="btn-create-repo" style="flex-shrink:0;padding:0 14px">✨ 一键创建</button>
+          </div>
+          <div class="hint">一键创建会在你的账号下建立同名私有仓库；数据存放在仓库根目录 kaoyan-helper-data.json（支持 100MB）。</div>
+        </div>
+
         <div class="sync-status" id="sync-status"></div>
-        <div style="display:flex;gap:8px;margin-top:8px">
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
           <button class="btn btn-ghost" id="btn-sync-now" style="flex:1">🔄 立即同步</button>
-          <button class="btn btn-ghost" id="btn-sync-open" style="flex:1">🔗 打开 Token 生成页</button>
+          <button class="btn btn-ghost" id="btn-migrate" style="flex:1">📦 迁移数据到所选位置</button>
+          <button class="btn btn-ghost" id="btn-sync-open" style="width:100%">🔗 打开 Token 生成页</button>
         </div>
         <div class="hint" style="margin-top:8px">
-          首次同步会自动创建私有 Gist 并上传全部记录；之后每次打开 App 自动拉取合并。
-          删除的记录会在其他设备重新出现（暂不支持删除同步）。
+          同步数据自动 gzip 压缩（约省 60~70% 空间）；首次同步自动创建云端存储并上传全部记录；
+          每次打开 App 自动拉取合并，删除也会同步。数据接近上限时 App 会提醒。
         </div>
       </div>
 
@@ -380,9 +406,9 @@ const App = (() => {
 
       <div class="card">
         <div class="card-title">ℹ️ 关于</div>
-        <div class="muted">考研解题助手 v1.6（同步删除）<br>
+        <div class="muted">考研解题助手 v1.7（压缩 + 仓库存储）<br>
         科目：数学一 / 英语一 / 408<br>
-        GitHub Gist 跨设备同步（含删除）· 已部署</div>
+        Gist/私有仓库双存储 · gzip 压缩 · 已部署</div>
       </div>`;
 
     const onChange = () => {
@@ -392,14 +418,21 @@ const App = (() => {
       s2.thinking = document.getElementById("set-thinking").checked;
       s2.effort = document.getElementById("set-effort").value;
       s2.githubToken = document.getElementById("set-github-token").value.trim();
+      s2.storageType = document.getElementById("set-storage-type").value;
+      s2.repoName = document.getElementById("set-repo-name") ? document.getElementById("set-repo-name").value.trim() : s2.repoName;
       API.saveSettings(s2);
     };
 
-    ["set-deepseek", "set-dashscope", "set-github-token"].forEach((id) => {
-      document.getElementById(id).addEventListener("input", onChange);
+    ["set-deepseek", "set-dashscope", "set-github-token", "set-repo-name"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener("input", onChange);
     });
     document.getElementById("set-thinking").addEventListener("change", onChange);
     document.getElementById("set-effort").addEventListener("change", onChange);
+    document.getElementById("set-storage-type").addEventListener("change", (e) => {
+      onChange();
+      renderSettings();
+    });
 
     document.getElementById("btn-test-deepseek").addEventListener("click", async (e) => {
       const btn = e.target;
@@ -442,7 +475,8 @@ const App = (() => {
       btn.textContent = "⏳ 同步中…";
       try {
         const r = await Sync.syncNow();
-        toast("同步完成 ✅ 本地 " + r.localCount + " 条" + (r.created ? "（已创建私有 Gist）" : ""));
+        const storeName = API.getSettings().storageType === "repo" ? "私有仓库" : "私有 Gist";
+        toast("同步完成 ✅ 本地 " + r.localCount + " 条" + (r.created ? "（已创建" + storeName + "）" : "") + (r.warning ? " · ⚠️" + r.warning : ""));
       } catch (err) {
         toast("同步失败：" + err.message);
       }
@@ -451,7 +485,49 @@ const App = (() => {
       renderSyncStatus();
     });
     document.getElementById("btn-sync-open").addEventListener("click", () => {
-      window.open("https://github.com/settings/tokens/new?scopes=gist&description=kaoyan-helper", "_blank");
+      const scopes = API.getSettings().storageType === "repo" ? "repo,gist" : "gist";
+      window.open("https://github.com/settings/tokens/new?scopes=" + scopes + "&description=kaoyan-helper", "_blank");
+    });
+    const btnCreateRepo = document.getElementById("btn-create-repo");
+    if (btnCreateRepo) {
+      btnCreateRepo.addEventListener("click", async (e) => {
+        const btn = e.target;
+        const name = (document.getElementById("set-repo-name").value || "").trim();
+        if (!name) { toast("请先填写仓库名称"); return; }
+        if (!document.getElementById("set-github-token").value.trim()) { toast("请先填写 GitHub Token"); return; }
+        btn.disabled = true;
+        btn.textContent = "⏳ 创建中…";
+        try {
+          await Sync.repoEnsure(document.getElementById("set-github-token").value.trim(), name);
+          toast("仓库已就绪 ✅ " + name);
+          document.getElementById("set-storage-type").value = "repo";
+          onChange();
+          renderSettings();
+        } catch (err) {
+          toast("创建失败：" + err.message);
+        }
+        btn.disabled = false;
+        btn.textContent = "✨ 一键创建";
+      });
+    }
+    document.getElementById("btn-migrate").addEventListener("click", async (e) => {
+      const btn = e.target;
+      if (!document.getElementById("set-github-token").value.trim()) { toast("请先填写 GitHub Token"); return; }
+      const target = document.getElementById("set-storage-type").value;
+      if (target === "repo" && !(document.getElementById("set-repo-name").value || "").trim()) { toast("请先填写仓库名称"); return; }
+      const targetName = target === "repo" ? "私有仓库" : "Gist";
+      if (!confirm("将把本地全部数据迁移到" + targetName + "，并切换存储位置。继续？")) return;
+      btn.disabled = true;
+      btn.textContent = "⏳ 迁移中…";
+      try {
+        const r = await Sync.migrateTo(target);
+        toast("迁移完成 ✅ 已上传 " + r.count + " 条到" + targetName);
+        renderSettings();
+      } catch (err) {
+        toast("迁移失败：" + err.message);
+      }
+      btn.disabled = false;
+      btn.textContent = "📦 迁移数据到所选位置";
     });
 
     document.getElementById("btn-export").addEventListener("click", async () => {

@@ -22,7 +22,10 @@ const API = (() => {
       thinking: true,
       effort: "high",
       githubToken: "",
-      gistId: ""
+      gistId: "",
+      storageType: "gist",
+      repoName: "",
+      repoOwner: ""
     }, s);
   }
 

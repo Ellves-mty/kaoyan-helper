@@ -65,6 +65,20 @@ async function main() {
         localStorage.setItem('kh_settings', JSON.stringify(s));
       };
 
+      /* 读取云端文件（自动解压 gzip） */
+      const readCloud = async (gist) => {
+        const content = gist.files['kaoyan-helper-data.json'].content;
+        let j = JSON.parse(content);
+        if (j.encoding === 'gzip' && j.payload) {
+          const binary = atob(j.payload);
+          const u8 = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) u8[i] = binary.charCodeAt(i);
+          const stream = new Blob([u8]).stream().pipeThrough(new DecompressionStream('gzip'));
+          j = JSON.parse(await new Response(stream).text());
+        }
+        return j;
+      };
+
       /* 场景1：设备 A 首次同步（2 条本地记录） */
       await DB.clear();
       await DB.clearTombstones();
@@ -156,7 +170,7 @@ async function main() {
       let r5 = null;
       try { r5 = await Sync.syncNow(); } catch (e) { out.syncErr5 = e.message; }
       const gist5 = await (await fetch('http://localhost:8123/gists/' + gistId, { headers: { 'Authorization': 'Bearer test-token' } })).json();
-      const file5 = JSON.parse(gist5.files['kaoyan-helper-data.json'].content);
+      const file5 = await readCloud(gist5);
       out.r5 = r5 ? { localCount: r5.localCount, changed: r5.changed } : null;
       out.deletedOnCloud = (file5.deleted || []).map(t => t.id);
       let r5b = null;
@@ -183,7 +197,7 @@ async function main() {
       const tombOld = { id: b.id, deletedAt: Date.now() - 60000 };
       const revivedB = { ...b, answer: 'correct', updatedAt: Date.now() };
       const gist7 = await (await fetch('http://localhost:8123/gists/' + gistId, { headers: { 'Authorization': 'Bearer test-token' } })).json();
-      const file7 = JSON.parse(gist7.files['kaoyan-helper-data.json'].content);
+      const file7 = await readCloud(gist7);
       const otherRecords = (file7.records || []).filter(r => r.id !== b.id);
       await fetch('http://localhost:8123/gists/' + gistId, {
         method: 'PATCH',
@@ -197,6 +211,49 @@ async function main() {
       const after7 = await DB.getAll();
       const b7 = after7.find(x => x.id === b.id);
       out.r7 = { localCount: after7.length, hasB: !!b7, bAnswer: b7 && b7.answer };
+
+      /* 场景8：gzip 压缩往返 — 新增记录 E 触发推送，云端文件应为 gzip；清空本地后同步应完整恢复 */
+      await DB.add({ subject: 'math', question: 'E题', solution: '解', category: '高数', type: '解答题', knowledgePoints: ['极限与连续'], difficulty: 2, tips: '', answer: null, answerAt: 8 });
+      let r8 = null;
+      try { r8 = await Sync.syncNow(); } catch (e) { out.syncErr8 = e.message; }
+      const gist8 = await (await fetch('http://localhost:8123/gists/' + gistId, { headers: { 'Authorization': 'Bearer test-token' } })).json();
+      const file8 = gist8.files['kaoyan-helper-data.json'].content;      out.gistIsGzip = file8.includes('"encoding":"gzip"') && !file8.includes('"records":');
+      await DB.clear();
+      await DB.clearTombstones();
+      let r8b = null;
+      try { r8b = await Sync.syncNow(); } catch (e) { out.syncErr8b = e.message; }
+      const after8 = await DB.getAll();
+      out.r8 = {
+        localCount: after8.length,
+        hasE: !!after8.find(x => x.question === 'E题'),
+        hasB: !!after8.find(x => x.id === b.id),
+        sizeKB: r8b ? r8b.sizeKB : null
+      };
+
+      /* 场景9：迁移到私有仓库（repoEnsure + 推送 + 切换） */
+      const st9 = JSON.parse(localStorage.getItem('kh_settings') || '{}');
+      st9.repoName = 'kaoyan-helper-data';
+      localStorage.setItem('kh_settings', JSON.stringify(st9));
+      let r9 = null;
+      try { r9 = await Sync.migrateTo('repo'); } catch (e) { out.syncErr9 = e.message; }
+      const repoFile = await (await fetch('http://localhost:8123/repos/test-user/kaoyan-helper-data/contents/kaoyan-helper-data.json', { headers: { 'Authorization': 'Bearer test-token' } })).json();
+      out.repoStored = !!repoFile.content;
+      out.repoIsGzip = repoFile.content && atob(repoFile.content).includes('"encoding":"gzip"');
+      out.repoStoredType = API.getSettings().storageType;
+      let r9b = null;
+      try { r9b = await Sync.syncNow(); } catch (e) { out.syncErr9b = e.message; }
+      const after9 = await DB.getAll();
+      out.r9 = { migratedCount: r9 ? r9.count : null, localCount: after9.length, hasE: !!after9.find(x => x.question === 'E题') };
+
+      /* 场景10：迁移回 Gist，再同步验证 */
+      let r10 = null;
+      try { r10 = await Sync.migrateTo('gist'); } catch (e) { out.syncErr10 = e.message; }
+      out.migratedBack = API.getSettings().storageType;
+      await DB.clear();
+      await DB.clearTombstones();
+      let r10b = null;
+      try { r10b = await Sync.syncNow(); } catch (e) { out.syncErr10b = e.message; }
+      out.r10 = { localCount: (await DB.getAll()).length };
       return out;
     })()`);
   console.log('RESULT:', JSON.stringify(result, null, 2));
@@ -227,7 +284,19 @@ async function main() {
     result.r6Idempotent === false &&
     result.r7.localCount === 4 &&
     result.r7.hasB === true &&
-    result.r7.bAnswer === 'correct';
+    result.r7.bAnswer === 'correct' &&
+    result.gistIsGzip === true &&
+    result.r8.localCount === 5 &&
+    result.r8.hasE === true &&
+    result.r8.hasB === true &&
+    result.repoStored === true &&
+    result.repoIsGzip === true &&
+    result.repoStoredType === 'repo' &&
+    result.r9.migratedCount === 5 &&
+    result.r9.localCount === 5 &&
+    result.r9.hasE === true &&
+    result.migratedBack === 'gist' &&
+    result.r10.localCount === 5;
 
   console.log(ok ? '=== Gist 同步测试通过 ===' : '=== Gist 同步测试失败 ===');
   ws.close();
