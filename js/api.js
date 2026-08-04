@@ -127,6 +127,65 @@ const API = (() => {
     return String(text || "").trim();
   }
 
+  /* 针对薄弱知识点出题（考研真题风格，非流式） */
+  async function generateProblem(subject, point) {
+    const s = getSettings();
+    if (!s.deepseekKey) throw new Error("请先在「设置」中填写 DeepSeek API Key");
+    const subj = SUBJECTS[subject] || SUBJECTS.math;
+    const system = `你是考研${subj.name}命题老师。请围绕指定知识点，出一道考研真题风格的练习题。
+要求：
+1. 难度贴合考研真题水平（区分选择/填空/解答的考查深度）。
+2. 数学一：公式用 LaTeX（行内 $...$）；408：如需可包含简短代码或结构描述；英语一：针对词汇/长难句出小练习。
+3. 只出题，不要给出答案或解析过程。
+4. 必须严格按 JSON 输出，不要输出其他内容：
+{"question": "题目内容", "type": "选择题|填空题|解答题|证明题|翻译题", "difficulty": 2, "hint": "不含答案的答题提示，可为空字符串"}`;
+
+    const body = {
+      model: "deepseek-v4-flash",
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: "知识点：" + point }
+      ],
+      stream: false,
+      max_tokens: 2000,
+      response_format: { type: "json_object" },
+      thinking: { type: "disabled" }
+    };
+
+    const res = await fetch(BASE + "/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer " + s.deepseekKey
+      },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) {
+      let msg = "HTTP " + res.status;
+      try { const j = await res.json(); msg = (j.error && (j.error.message || j.error.code)) || msg; } catch (e) {}
+      throw new Error(msg);
+    }
+    const j = await res.json();
+    let text = (j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || "";
+    text = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+    let obj = null;
+    try { obj = JSON.parse(text); } catch (e) {}
+    if (!obj) {
+      const start = text.indexOf("{");
+      const end = text.lastIndexOf("}");
+      if (start !== -1 && end > start) {
+        try { obj = JSON.parse(text.slice(start, end + 1)); } catch (e2) {}
+      }
+    }
+    if (!obj || !obj.question) throw new Error("出题失败，请重试");
+    return {
+      question: String(obj.question).trim(),
+      type: String(obj.type || "解答题").trim(),
+      difficulty: Math.min(5, Math.max(1, parseInt(obj.difficulty, 10) || 2)),
+      hint: String(obj.hint || "").trim()
+    };
+  }
+
   /* 浏览器端图片压缩：最大边 1600px，JPEG 0.85 */
   function compressImage(file) {
     return new Promise((resolve, reject) => {
@@ -279,5 +338,5 @@ const API = (() => {
     };
   }
 
-  return { solve, parseSolution, getSettings, saveSettings, testDeepSeek, testDashScope, extractFromImages, compressImage, getExamDate, daysUntilExam };
+  return { solve, parseSolution, getSettings, saveSettings, testDeepSeek, testDashScope, extractFromImages, compressImage, getExamDate, daysUntilExam, generateProblem };
 })();

@@ -237,6 +237,12 @@ select {
 .empty .empty-icon { font-size: 40px; display: block; margin-bottom: 10px; }
 
 /* 统计页 */
+.trend-tabs { display: flex; gap: 6px; margin-bottom: 8px; }
+.trend-tab {
+  border: 1.5px solid var(--border); background: var(--card); color: var(--muted);
+  border-radius: 999px; padding: 4px 14px; font-size: 12px; cursor: pointer;
+}
+.trend-tab.active { border-color: var(--primary); color: var(--primary); background: var(--primary-light); font-weight: 600; }
 .stat-summary { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
 .stat-summary .meta-item { grid-column: span 1; }
 .stat-summary .meta-item:nth-child(1) { grid-column: span 1; }

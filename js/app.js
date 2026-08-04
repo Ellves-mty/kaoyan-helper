@@ -99,7 +99,7 @@ const App = (() => {
     document.getElementById("btn-go-solve").addEventListener("click", () => { location.hash = "#/solve"; });
   }
 
-  /* ---------- 统计（知识点柱状图 + 正确率 + 薄弱点排行） ---------- */
+  /* ---------- 统计（知识点柱状图 + 正确率 + 薄弱点排行 + 学习趋势） ---------- */
 
   const ACC_COLORS = {
     good: "#16a34a",
@@ -113,6 +113,68 @@ const App = (() => {
     if (acc >= 0.8) return ACC_COLORS.good;
     if (acc >= 0.5) return ACC_COLORS.warn;
     return ACC_COLORS.weak;
+  }
+
+  /* 学习趋势聚合：按天（最近 14 天）或按周（最近 12 周） */
+  function computeTrend(records, mode) {
+    const now = new Date();
+    const N = mode === "day" ? 14 : 12;
+    const buckets = [];
+    for (let i = N - 1; i >= 0; i--) {
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (mode === "day" ? i : i * 7));
+      const end = new Date(start);
+      if (mode === "week") end.setDate(end.getDate() + 7);
+      else end.setDate(end.getDate() + 1);
+      buckets.push({
+        start, end, total: 0, marked: 0, correct: 0,
+        label: (start.getMonth() + 1) + "/" + start.getDate()
+      });
+    }
+    for (const r of records) {
+      const t = r.createdAt || r.updatedAt;
+      if (!t) continue;
+      const d = new Date(t);
+      for (const b of buckets) {
+        if (d >= b.start && d < b.end) {
+          b.total++;
+          if (r.answer) {
+            b.marked++;
+            if (r.answer === "correct") b.correct++;
+          }
+          break;
+        }
+      }
+    }
+    return buckets;
+  }
+
+  function renderTrendSvg(buckets) {
+    const W = 330, H = 150, PADL = 4, PADR = 4, PADT = 10, PADB = 18;
+    const plotH = H - PADT - PADB;
+    const maxTotal = Math.max(1, ...buckets.map((b) => b.total));
+    const slot = (W - PADL - PADR) / buckets.length;
+    const bw = Math.min(20, slot * 0.55);
+    let bars = "", linePts = [], circles = "", labels = "";
+    buckets.forEach((b, i) => {
+      const cx = PADL + i * slot + slot / 2;
+      const h = b.total === 0 ? 2 : Math.max(4, b.total / maxTotal * plotH);
+      const y = H - PADB - h;
+      const acc = b.marked ? b.correct / b.marked : null;
+      const color = accuracyColor(acc, b.marked);
+      bars += `<rect x="${(cx - bw / 2).toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="${color}" opacity="0.85"/>`;
+      if (b.marked) {
+        const py = (H - PADB - acc * plotH).toFixed(1);
+        linePts.push((cx).toFixed(1) + "," + py);
+        circles += `<circle cx="${cx.toFixed(1)}" cy="${py}" r="2.5" fill="#2563eb"/>`;
+      }
+      if (i % 2 === 0 || buckets.length <= 7) {
+        labels += `<text x="${cx.toFixed(1)}" y="${H - 5}" font-size="9" fill="#6b7280" text-anchor="middle">${b.label}</text>`;
+      }
+    });
+    const line = linePts.length > 1
+      ? `<polyline points="${linePts.join(" ")}" fill="none" stroke="#2563eb" stroke-width="2"/>` + circles
+      : circles;
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" aria-label="学习趋势图">${bars}${line}${labels}</svg>`;
   }
 
   function computeStats(records) {
@@ -240,6 +302,28 @@ const App = (() => {
       return;
     }
 
+    /* 学习趋势 */
+    const trendMode = localStorage.getItem("kh_trend_mode") || "day";
+    const trendRecs = all.filter((r) => subjects.indexOf(r.subject) !== -1);
+    const buckets = computeTrend(trendRecs, trendMode === "week" ? "week" : "day");
+    const trendHtml = `
+      <div class="card">
+        <div class="card-title">📈 学习趋势 <span class="muted" style="font-weight:400">（最近 ${trendMode === "week" ? "12 周" : "14 天"}）</span></div>
+        <div class="trend-tabs">
+          <button class="trend-tab ${trendMode === "day" ? "active" : ""}" data-mode="day">按天</button>
+          <button class="trend-tab ${trendMode === "week" ? "active" : ""}" data-mode="week">按周</button>
+        </div>
+        ${renderTrendSvg(buckets)}
+        <div class="stat-legend" style="margin-top:6px">
+          <span><i style="background:${ACC_COLORS.good}"></i>≥80%</span>
+          <span><i style="background:${ACC_COLORS.warn}"></i>50~80%</span>
+          <span><i style="background:${ACC_COLORS.weak}"></i>&lt;50%</span>
+          <span><i style="background:${ACC_COLORS.none}"></i>未标记</span>
+          <span><i style="background:#2563eb;border-radius:50%"></i>正确率折线</span>
+        </div>
+        <div id="problem-result"></div>
+      </div>`;
+
     let weakHtml = "";
     let weakList = [];
     subjects.forEach((k) => {
@@ -250,13 +334,14 @@ const App = (() => {
     if (weakList.length) {
       weakHtml = `
         <div class="card">
-          <div class="card-title">⚠️ 薄弱点排行 <span class="muted" style="font-weight:400">（按正确率从低到高）</span></div>
+          <div class="card-title">⚠️ 薄弱点排行 <span class="muted" style="font-weight:400">（按正确率从低到高，可针对性出题）</span></div>
           ${weakList.slice(0, 6).map((w) => `
             <div class="weak-item">
               <span class="subject-dot" style="background:${SUBJECTS[w.subject].color}"></span>
               <span class="weak-name">${w.name}</span>
               <span class="weak-count">${w.total}次 · 对${w.correct}</span>
               <span class="weak-rate" style="color:${accuracyColor(w.acc, 1)}">${Math.round(w.acc * 100)}%</span>
+              <button class="btn btn-ghost weak-practice" data-subject="${w.subject}" data-point="${escapeHtml(w.name)}" style="flex-shrink:0;padding:5px 10px;font-size:12px">🎯 出题</button>
             </div>`).join("")}
         </div>`;
     }
@@ -279,7 +364,51 @@ const App = (() => {
         </div>`;
     }
 
-    body.innerHTML = weakHtml + chartHtml;
+    body.innerHTML = trendHtml + weakHtml + chartHtml;
+
+    /* 趋势天/周切换 */
+    document.querySelectorAll(".trend-tab").forEach((t) => {
+      t.addEventListener("click", () => {
+        localStorage.setItem("kh_trend_mode", t.dataset.mode);
+        renderStats();
+      });
+    });
+
+    /* 薄弱点出题 */
+    document.querySelectorAll(".weak-practice").forEach((btn) => {
+      btn.addEventListener("click", () => startPractice(btn.dataset.subject, btn.dataset.point));
+    });
+  }
+
+  /* 针对薄弱知识点出题练习 */
+  async function startPractice(subject, point) {
+    const box = document.getElementById("problem-result");
+    box.innerHTML = `<div class="solve-status">🎯 正在为「${escapeHtml(point)}」出题…</div>`;
+    try {
+      const p = await API.generateProblem(subject, point);
+      const diff = "★".repeat(p.difficulty) + "☆".repeat(5 - p.difficulty);
+      box.innerHTML = `
+        <div class="card" style="margin-top:10px;background:var(--primary-light);border:1px solid #bfdbfe">
+          <div class="card-title">🎯 针对性练习：${escapeHtml(point)} <span class="muted" style="font-weight:400">（${SUBJECTS[subject].name}）</span></div>
+          <div class="meta-grid" style="grid-template-columns:1fr 1fr">
+            <div class="meta-item"><div class="mi-label">题型</div><div class="mi-value">${escapeHtml(p.type)}</div></div>
+            <div class="meta-item"><div class="mi-label">难度</div><div class="mi-value stars">${diff}</div></div>
+          </div>
+          <div class="md" style="margin:8px 0">${MD.render(p.question)}</div>
+          ${p.hint ? `<div class="hint">💡 ${escapeHtml(p.hint)}</div>` : ""}
+          <button class="btn btn-primary" id="btn-solve-problem" style="margin-top:10px">✏️ 在解题页解答此题</button>
+          <div class="hint" style="margin-top:6px">本题完成并标记对错后，会自动计入「${escapeHtml(point)}」的正确率统计。</div>
+        </div>`;
+      MD.afterRender(box);
+      document.getElementById("btn-solve-problem").addEventListener("click", () => {
+        localStorage.setItem("kh_current_subject", subject);
+        localStorage.setItem("kh_pending_question", p.question);
+        location.hash = "#/solve";
+      });
+      box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    } catch (err) {
+      box.innerHTML = `<div class="danger-text" style="margin-top:8px">❌ 出题失败：${escapeHtml(err.message)}</div>`;
+    }
   }
 
   /* ---------- 设置 ---------- */
@@ -416,9 +545,9 @@ const App = (() => {
 
       <div class="card">
         <div class="card-title">ℹ️ 关于</div>
-        <div class="muted">考研解题助手 v1.7（压缩 + 仓库存储）<br>
+        <div class="muted">考研解题助手 v1.8（趋势 + 出题）<br>
         科目：数学一 / 英语一 / 408<br>
-        Gist/私有仓库双存储 · gzip 压缩 · 已部署</div>
+        学习趋势 · 薄弱点出题 · 跨设备同步 · 已部署</div>
       </div>`;
 
     const onChange = () => {

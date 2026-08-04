@@ -95,6 +95,18 @@ const SolveView = (() => {
       else startSolve();
     };
     updateSolveBtn();
+
+    /* 从统计页「出题练习」跳转带来的待解答题目 */
+    const pendingQ = localStorage.getItem("kh_pending_question");
+    if (pendingQ) {
+      localStorage.removeItem("kh_pending_question");
+      const ta = document.getElementById("solve-question");
+      if (ta) {
+        ta.value = pendingQ;
+        ta.focus();
+        toast("已载入针对性练习题，点击「开始解题」作答");
+      }
+    }
   }
 
   function switchInputMode(mode) {
