@@ -25,8 +25,26 @@ const API = (() => {
       gistId: "",
       storageType: "gist",
       repoName: "",
-      repoOwner: ""
+      repoOwner: "",
+      examDate: ""
     }, s);
+  }
+
+  /* 考研日期：优先用设置值；未设置时用今年 12 月 19 日（历年惯例 12 月第三个周末），已过则顺延明年 */
+  function getExamDate() {
+    const s = getSettings();
+    if (s.examDate && !isNaN(new Date(s.examDate + "T00:00:00").getTime())) {
+      return new Date(s.examDate + "T00:00:00");
+    }
+    const now = new Date();
+    const d = new Date(now.getFullYear(), 11, 19);
+    if (d.getTime() < now.getTime()) d.setFullYear(now.getFullYear() + 1);
+    return d;
+  }
+
+  function daysUntilExam() {
+    const exam = getExamDate();
+    return Math.max(0, Math.round((exam - new Date()) / 86400000));
   }
 
   function saveSettings(s) {
@@ -261,5 +279,5 @@ const API = (() => {
     };
   }
 
-  return { solve, parseSolution, getSettings, saveSettings, testDeepSeek, testDashScope, extractFromImages, compressImage };
+  return { solve, parseSolution, getSettings, saveSettings, testDeepSeek, testDashScope, extractFromImages, compressImage, getExamDate, daysUntilExam };
 })();

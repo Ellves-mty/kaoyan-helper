@@ -69,11 +69,14 @@ const App = (() => {
 
     const hour = new Date().getHours();
     const greet = hour < 6 ? "夜深了" : hour < 12 ? "早上好" : hour < 18 ? "下午好" : "晚上好";
+    const exam = API.getExamDate();
+    const days = API.daysUntilExam();
+    const examStr = exam.getFullYear() + "年" + (exam.getMonth() + 1) + "月" + exam.getDate() + "日";
 
     document.getElementById("view").innerHTML = `
       <div class="home-hero">
         <h2>${greet}，考研人 📚</h2>
-        <div class="sub">今日距考研还有 ${Math.max(0, Math.round((new Date("2027-12-25") - Date.now()) / 86400000))} 天，加油！</div>
+        <div class="sub">距离 ${examStr} 考研还有 <b style="color:var(--primary)">${days}</b> 天，加油！${days <= 100 ? "🔥 冲刺阶段，稳住！" : ""}</div>
       </div>
       <div class="subject-cards">${cards}</div>
       <button class="btn btn-primary" id="btn-go-solve">✏️ 开始解题</button>
@@ -349,6 +352,13 @@ const App = (() => {
             <option value="max" ${s.effort === "max" ? "selected" : ""}>最高</option>
           </select>
         </div>
+        <div class="setting-row">
+          <div>
+            <div class="sr-label">🎯 考研日期</div>
+            <div class="sr-desc">首页倒计时按此计算（默认今年 12 月 19 日，可改）</div>
+          </div>
+          <input type="date" id="set-exam-date" value="${s.examDate || ""}" style="width:auto">
+        </div>
       </div>
 
       <div class="card">
@@ -420,6 +430,7 @@ const App = (() => {
       s2.githubToken = document.getElementById("set-github-token").value.trim();
       s2.storageType = document.getElementById("set-storage-type").value;
       s2.repoName = document.getElementById("set-repo-name") ? document.getElementById("set-repo-name").value.trim() : s2.repoName;
+      s2.examDate = document.getElementById("set-exam-date").value || "";
       API.saveSettings(s2);
     };
 
@@ -429,6 +440,7 @@ const App = (() => {
     });
     document.getElementById("set-thinking").addEventListener("change", onChange);
     document.getElementById("set-effort").addEventListener("change", onChange);
+    document.getElementById("set-exam-date").addEventListener("change", onChange);
     document.getElementById("set-storage-type").addEventListener("change", (e) => {
       onChange();
       renderSettings();
@@ -584,8 +596,9 @@ const App = (() => {
   return { init, toast };
 })();
 
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", App.init);
-} else {
+/* 不依赖 DOMContentLoaded（CDN 挂起会阻塞该事件）：DOM 就绪即启动，兜底监听事件 */
+if (document.getElementById("view") && document.getElementById("tabbar")) {
   App.init();
+} else {
+  document.addEventListener("DOMContentLoaded", App.init);
 }
